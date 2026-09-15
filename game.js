@@ -130,7 +130,10 @@ function resetFruit() {
     currentFruit.x = Math.random() * (canvas.width - randomType.size);
     currentFruit.y = -randomType.size;
     currentFruit.isGold = Math.random() < 0.4; // 40% xuất hiện bản VÀNG
-    currentFruit.speed = randomType.speedMod + (score / 150);
+    
+    // Cập nhật: Cứ mỗi 10 điểm tốc độ tăng thêm 0.25 (Càng nhiều điểm càng rơi nhanh)
+    const speedBoost = (score / 10) * 0.25;
+    currentFruit.speed = randomType.speedMod + speedBoost;
 }
 
 function resetBomb() {
@@ -138,7 +141,10 @@ function resetBomb() {
         bomb.active = true;
         bomb.x = Math.random() * (canvas.width - bomb.size);
         bomb.y = -Math.random() * 200 - 50;
-        bomb.speed = 3.8 + (score / 120);
+        
+        // Cập nhật: Tốc độ bom cũng tăng theo điểm số tương tự trái cây
+        const speedBoost = (score / 10) * 0.25;
+        bomb.speed = 3.8 + speedBoost;
     } else {
         bomb.active = false;
         bomb.y = -200;
