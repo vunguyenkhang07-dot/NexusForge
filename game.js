@@ -20,27 +20,26 @@ function playSound(freq, type, duration, startVol = 0.1) {
     osc.stop(audioCtx.currentTime + duration);
 }
 
-// Âm thanh khi ăn táo đỏ
-function playEatSound() { 
-    playSound(600, 'sine', 0.15); 
-}
-
-// Âm thanh đặc biệt khi ăn Táo Vàng (tiếng chuông ngân cao)
-function playGoldAppleSound() {
+function playEatSound() { playSound(600, 'sine', 0.15); }
+function playGoldFruitSound() {
     playSound(900, 'triangle', 0.1, 0.2);
     setTimeout(() => playSound(1200, 'sine', 0.25, 0.2), 80);
 }
-
-// Âm thanh khi hứng phải Bom (Tiếng nổ)
 function playExplosionSound() {
     playSound(100, 'sawtooth', 0.6, 0.4);
     playSound(60, 'square', 0.8, 0.4);
 }
+function playGameOverSound() { playSound(150, 'sawtooth', 0.5); }
 
-// Âm thanh khi để táo rơi mất
-function playGameOverSound() { 
-    playSound(150, 'sawtooth', 0.5); 
-}
+// --- DANH SÁCH CÁC LOẠI TRÁI CÂY ---
+// Tất cả trái cây có điểm cơ bản = 10, bản vàng = 20
+const FRUIT_TYPES = [
+    { name: "apple", color: "#FF2400", score: 10, size: 24, speedMod: 3.5 },
+    { name: "orange", color: "#FF8C00", score: 10, size: 24, speedMod: 3.8 },
+    { name: "banana", color: "#FFE135", score: 10, size: 26, speedMod: 4.2 },
+    { name: "strawberry", color: "#E30B5C", score: 10, size: 22, speedMod: 4.5 },
+    { name: "watermelon", color: "#228B22", score: 10, size: 28, speedMod: 4.0 }
+];
 
 // --- CẤU HÌNH ĐỐI TƯỢNG ---
 const basket = {
@@ -48,32 +47,32 @@ const basket = {
     y: canvas.height - 35,
     width: 70,
     height: 22,
-    speed: 7,
+    speed: 11,
     dx: 0
 };
 
-// Quả táo (Thường hoặc Vàng)
-const apple = {
-    x: Math.random() * (canvas.width - 24),
+// Trái cây hiện tại
+const currentFruit = {
+    x: Math.random() * (canvas.width - 26),
     y: 0,
-    size: 24,
-    speed: 3.5,
-    isGold: false
+    type: FRUIT_TYPES[0],
+    isGold: false,
+    speed: 3.5
 };
 
 // Quả bom
 const bomb = {
     x: Math.random() * (canvas.width - 22),
-    y: -100, // Ban đầu giấu bom ở trên
+    y: -100,
     size: 22,
     speed: 4,
     active: false
 };
 
 let score = 0;
-let highScore = localStorage.getItem("apple_game_highscore") || 0;
+let highScore = localStorage.getItem("fruit_game_highscore") || 0;
 let gameOver = false;
-let gameOverReason = ""; // Lý do thua (Rơi táo hay Trúng bom)
+let gameOverReason = "";
 
 // --- BẮT SỰ KIỆN MÁY TÍNH & CẢM ỨNG ---
 document.addEventListener("keydown", (e) => {
@@ -107,28 +106,30 @@ canvas.addEventListener("touchstart", (e) => { if (gameOver) { e.preventDefault(
 // --- QUẢN LÝ GAME ---
 function restartGame() {
     score = 0;
-    apple.speed = 3.5;
     gameOver = false;
     gameOverReason = "";
-    resetApple();
+    resetFruit();
     resetBomb();
     gameLoop();
 }
 
-function resetApple() {
-    apple.x = Math.random() * (canvas.width - apple.size);
-    apple.y = -apple.size;
-    // Tỷ lệ 20% ra Táo Vàng x2 điểm
-    apple.isGold = Math.random() < 0.2; 
-    apple.speed = (apple.isGold ? 4.2 : 3.5) + (score / 100); // Tăng dần theo điểm
+function resetFruit() {
+    // Chọn ngẫu nhiên 1 trong 5 loại trái cây
+    const randomType = FRUIT_TYPES[Math.floor(Math.random() * FRUIT_TYPES.length)];
+    currentFruit.type = randomType;
+    currentFruit.x = Math.random() * (canvas.width - randomType.size);
+    currentFruit.y = -randomType.size;
+    
+    // Tỷ lệ 40% xuất hiện bản VÀNG (20 điểm)
+    currentFruit.isGold = Math.random() < 0.4; 
+    currentFruit.speed = randomType.speedMod + (score / 150);
 }
 
 function resetBomb() {
-    // Chỉ kích hoạt bom khi đã đạt trên 20 điểm
-    if (score >= 20 && Math.random() < 0.7) {
+    if (Math.random() < 0.6) {
         bomb.active = true;
         bomb.x = Math.random() * (canvas.width - bomb.size);
-        bomb.y = -Math.random() * 200 - 50; // Xuất hiện ngẫu nhiên sau táo
+        bomb.y = -Math.random() * 200 - 50;
         bomb.speed = 3.8 + (score / 120);
     } else {
         bomb.active = false;
@@ -136,9 +137,8 @@ function resetBomb() {
     }
 }
 
-// --- VẼ ĐỒ HỌA ---
+// --- VẼ ĐỒ HỌA TRÁI CÂY & GIỎ ---
 
-// Vẽ cái giỏ
 function drawBasket() {
     ctx.fillStyle = "#8B4513";
     ctx.beginPath();
@@ -149,40 +149,80 @@ function drawBasket() {
     ctx.fillRect(basket.x + 5, basket.y + 4, basket.width - 10, 4);
 }
 
-// Vẽ Táo đỏ / Táo vàng
-function drawApple() {
-    const cx = apple.x + apple.size / 2;
-    const cy = apple.y + apple.size / 2;
-    const r = apple.size / 2;
+// Vẽ các loại trái cây
+function drawFruit() {
+    const cx = currentFruit.x + currentFruit.type.size / 2;
+    const cy = currentFruit.y + currentFruit.type.size / 2;
+    const r = currentFruit.type.size / 2;
 
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    // Táo vàng hoặc Táo đỏ
-    ctx.fillStyle = apple.isGold ? "#FFD700" : "#FF2400";
-    ctx.fill();
+    const mainColor = currentFruit.isGold ? "#FFD700" : currentFruit.type.color;
 
-    // Vệt sáng bóng
-    ctx.beginPath();
-    ctx.arc(cx - r/3, cy - r/3, r/4, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-    ctx.fill();
+    ctx.save();
 
-    // Cuống táo
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - r);
-    ctx.lineTo(cx + 2, cy - r - 5);
-    ctx.strokeStyle = "#5C4033";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    switch (currentFruit.type.name) {
+        case "apple":
+        case "orange":
+            // Quả hình tròn (Táo / Cam)
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fillStyle = mainColor;
+            ctx.fill();
 
-    // Lá táo
-    ctx.beginPath();
-    ctx.ellipse(cx + 4, cy - r - 3, 4, 2, Math.PI / 4, 0, Math.PI * 2);
-    ctx.fillStyle = "#32CD32";
-    ctx.fill();
+            // Vệt sáng
+            ctx.beginPath();
+            ctx.arc(cx - r/3, cy - r/3, r/4, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+            ctx.fill();
+            break;
+
+        case "banana":
+            // Chuối cong
+            ctx.beginPath();
+            ctx.arc(cx - 5, cy, r, -Math.PI / 3, Math.PI / 3);
+            ctx.lineWidth = 8;
+            ctx.strokeStyle = mainColor;
+            ctx.stroke();
+            break;
+
+        case "strawberry":
+            // Dâu tây dạng hình tam giác bo góc
+            ctx.beginPath();
+            ctx.moveTo(cx, cy + r);
+            ctx.lineTo(cx - r, cy - r/2);
+            ctx.lineTo(cx + r, cy - r/2);
+            ctx.closePath();
+            ctx.fillStyle = mainColor;
+            ctx.fill();
+            break;
+
+        case "watermelon":
+            // Dưa hấu nửa hình tròn
+            ctx.beginPath();
+            ctx.arc(cx, cy - 2, r, 0, Math.PI);
+            ctx.fillStyle = currentFruit.isGold ? "#FFD700" : "#FF3333";
+            ctx.fill();
+            // Vỏ xanh
+            ctx.beginPath();
+            ctx.arc(cx, cy - 2, r, 0, Math.PI);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = currentFruit.isGold ? "#B8860B" : "#006400";
+            ctx.stroke();
+            break;
+    }
+
+    // Nếu là bản VÀNG thì vẽ hiệu ứng hào quang lấp lánh
+    if (currentFruit.isGold) {
+        ctx.strokeStyle = "rgba(255, 215, 0, 0.6)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    ctx.restore();
 }
 
-// Vẽ Quả Bom 💣
+// Vẽ Bom
 function drawBomb() {
     if (!bomb.active) return;
 
@@ -190,13 +230,11 @@ function drawBomb() {
     const cy = bomb.y + bomb.size / 2;
     const r = bomb.size / 2;
 
-    // Thân bom màu đen
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = "#222";
     ctx.fill();
 
-    // Ngòi nổ
     ctx.beginPath();
     ctx.moveTo(cx, cy - r);
     ctx.lineTo(cx + 4, cy - r - 6);
@@ -204,7 +242,6 @@ function drawBomb() {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Tia lửa ngòi nổ
     ctx.beginPath();
     ctx.arc(cx + 4, cy - r - 7, 3, 0, Math.PI * 2);
     ctx.fillStyle = "#FF4500";
@@ -220,44 +257,45 @@ function update() {
     if (basket.x < 0) basket.x = 0;
     if (basket.x + basket.width > canvas.width) basket.x = canvas.width - basket.width;
 
-    // Di chuyển táo
-    apple.y += apple.speed;
+    // Di chuyển trái cây
+    currentFruit.y += currentFruit.speed;
 
-    // Hứng táo thành công
+    // Hứng trái cây thành công
     if (
-        apple.y + apple.size >= basket.y &&
-        apple.x + apple.size >= basket.x &&
-        apple.x <= basket.x + basket.width
+        currentFruit.y + currentFruit.type.size >= basket.y &&
+        currentFruit.x + currentFruit.type.size >= basket.x &&
+        currentFruit.x <= basket.x + basket.width
     ) {
-        if (apple.isGold) {
-            score += 20; // Táo vàng x2 điểm (+20)
-            playGoldAppleSound();
+        // Trái cây thường: 10 điểm | Trái cây vàng: 20 điểm
+        const earnedScore = currentFruit.isGold ? 20 : 10;
+        score += earnedScore;
+
+        if (currentFruit.isGold) {
+            playGoldFruitSound();
         } else {
-            score += 10; // Táo thường (+10)
             playEatSound();
         }
 
         if (score > highScore) {
             highScore = score;
-            localStorage.setItem("apple_game_highscore", highScore);
+            localStorage.setItem("fruit_game_highscore", highScore);
         }
 
-        resetApple();
-        if (!bomb.active) resetBomb(); // Có cơ hội xuất hiện bom mới
+        resetFruit();
+        if (!bomb.active) resetBomb();
     }
 
-    // Táo rơi mất -> Thua
-    if (apple.y > canvas.height) {
+    // Trái cây rơi mất -> Thua
+    if (currentFruit.y > canvas.height) {
         gameOver = true;
-        gameOverReason = "BẠN ĐÃ ĐỂ TÁO RƠI!";
+        gameOverReason = "BẠN ĐÃ BỎ SÓT TRÁI CÂY!";
         playGameOverSound();
     }
 
-    // Di chuyển bom (nếu đang kích hoạt)
+    // Di chuyển bom
     if (bomb.active) {
         bomb.y += bomb.speed;
 
-        // Va chạm Bom với Giỏ -> Nổ thua cuộc
         if (
             bomb.y + bomb.size >= basket.y &&
             bomb.x + bomb.size >= basket.x &&
@@ -268,7 +306,6 @@ function update() {
             playExplosionSound();
         }
 
-        // Bom rơi khỏi màn hình thì biến mất
         if (bomb.y > canvas.height) {
             resetBomb();
         }
@@ -280,7 +317,7 @@ function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     drawBasket();
-    drawApple();
+    drawFruit();
     drawBomb();
 
     // Điểm số & Kỷ lục
