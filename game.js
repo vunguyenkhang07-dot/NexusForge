@@ -1,342 +1,467 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Game Hứng Trái Cây</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
 
-        body {
-            background-color: #1a1a2e;
-            color: #fff;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            overflow: hidden;
-        }
+// --- ÂM THANH (Web Audio API) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-        h1 {
-            margin-bottom: 12px;
-            color: #ffdd59;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.6);
-            font-size: 2rem;
-        }
+function playSound(freq, type, duration, startVol = 0.1) {
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(startVol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+}
 
-        #game-container {
-            position: relative;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
-            border-radius: 12px;
-            overflow: hidden;
-        }
+function playEatSound() { playSound(600, 'sine', 0.15); }
+function playGoldFruitSound() {
+    playSound(900, 'triangle', 0.1, 0.2);
+    setTimeout(() => playSound(1200, 'sine', 0.25, 0.2), 80);
+}
+function playLoseLifeSound() {
+    playSound(220, 'sawtooth', 0.2, 0.3);
+}
+function playExplosionSound() {
+    playSound(100, 'sawtooth', 0.6, 0.4);
+    playSound(60, 'square', 0.8, 0.4);
+}
+function playGameOverSound() { playSound(150, 'sawtooth', 0.5); }
 
-        canvas {
-            display: block;
-            background-color: #87ceeb;
-            transition: background-color 2s ease; /* Chuyển màu nền mượt mà */
-        }
+// --- TRẠNG THÁI GAME ---
+let gameState = "MENU"; // Các trạng thái: MENU, PLAYING, GAMEOVER
+let score = 0;
+let lives = 3; // Thêm 3 mạng
+let highScore = localStorage.getItem("fruit_game_highscore") || 0;
+let gameOverReason = "";
 
-        .controls-hint {
-            margin-top: 12px;
-            font-size: 0.9rem;
-            color: #dcdde1;
-        }
-    </style>
-</head>
-<body>
+// --- DANH SÁCH CÁC LOẠI TRÁI CÂY ---
+const FRUIT_TYPES = [
+    { name: "apple", color: "#FF2400", size: 28, speedMod: 3.5 },
+    { name: "orange", color: "#FFA500", size: 28, speedMod: 3.8 },
+    { name: "banana", color: "#FFE135", size: 30, speedMod: 4.2 },
+    { name: "strawberry", color: "#E30B5C", size: 26, speedMod: 4.5 },
+    { name: "watermelon", color: "#228B22", size: 32, speedMod: 4.0 }
+];
 
-    <h1>GAME HỨNG TRÁI CÂY</h1>
+// --- CẤU HÌNH ĐỐI TƯỢNG ---
+const basket = {
+    x: canvas.width / 2 - 35,
+    y: canvas.height - 35,
+    width: 70,
+    height: 22,
+    speed: 11,
+    dx: 0
+};
 
-    <div id="game-container">
-        <canvas id="gameCanvas" width="500" height="600"></canvas>
-    </div>
+const currentFruit = {
+    x: Math.random() * (canvas.width - 32),
+    y: 0,
+    type: FRUIT_TYPES[0],
+    isGold: false,
+    speed: 3.5
+};
 
-    <p class="controls-hint">Sử dụng <b>Phím Mũi Tên Trái/Phải</b> hoặc <b>Di chuyển Chuột</b> để điều khiển thanh hứng.</p>
+const bomb = {
+    x: Math.random() * (canvas.width - 22),
+    y: -100,
+    size: 24,
+    speed: 4,
+    active: false
+};
 
-    <script>
-        const canvas = document.getElementById("gameCanvas");
-        const ctx = canvas.getContext("2d");
+// --- BẮT SỰ KIỆN NÚT VÀ PHÍM ---
+document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "a") basket.dx = -basket.speed;
+    if (e.key === "ArrowRight" || e.key === "d") basket.dx = basket.speed;
+    if ((gameState === "MENU" || gameState === "GAMEOVER") && e.key === " ") {
+        startGame();
+    }
+});
 
-        // --- CẤU HÌNH & TRẠNG THÁI GAME ---
-        let score = 0;
-        let lives = 3;
-        let gameOver = false;
+document.addEventListener("keyup", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "ArrowRight" || e.key === "d") {
+        basket.dx = 0;
+    }
+});
 
-        // Kích thước thanh hứng cơ bản
-        const BASE_PADDLE_WIDTH = 100;
-        const PADDLE_HEIGHT = 18;
+const btnLeft = document.getElementById("btnLeft");
+const btnRight = document.getElementById("btnRight");
 
-        const paddle = {
-            x: canvas.width / 2 - BASE_PADDLE_WIDTH / 2,
-            y: canvas.height - 30,
-            width: BASE_PADDLE_WIDTH,
-            height: PADDLE_HEIGHT,
-            speed: 8,
-            isExpanded: false,
-            expandTimer: null
-        };
+btnLeft.addEventListener("touchstart", (e) => { e.preventDefault(); basket.dx = -basket.speed; });
+btnLeft.addEventListener("touchend", (e) => { e.preventDefault(); basket.dx = 0; });
+btnLeft.addEventListener("mousedown", () => basket.dx = -basket.speed);
+btnLeft.addEventListener("mouseup", () => basket.dx = 0);
 
-        // Điều khiển phím
-        let rightPressed = false;
-        let leftPressed = false;
+btnRight.addEventListener("touchstart", (e) => { e.preventDefault(); basket.dx = basket.speed; });
+btnRight.addEventListener("touchend", (e) => { e.preventDefault(); basket.dx = 0; });
+btnRight.addEventListener("mousedown", () => basket.dx = basket.speed);
+btnRight.addEventListener("mouseup", () => basket.dx = 0);
 
-        // Danh sách vật phẩm rơi
-        let items = [];
-        let spawnTimer = 0;
+canvas.addEventListener("click", () => {
+    if (gameState === "MENU" || gameState === "GAMEOVER") startGame();
+});
+canvas.addEventListener("touchstart", (e) => {
+    if (gameState === "MENU" || gameState === "GAMEOVER") {
+        e.preventDefault();
+        startGame();
+    }
+});
 
-        // Trạng thái hiệu ứng Rung màn hình (Screen Shake)
-        let shakeDuration = 0;
-        let shakeMagnitude = 0;
+// --- QUẢN LÝ GAME ---
+function startGame() {
+    score = 0;
+    lives = 3; // Khởi tạo 3 mạng khi bắt đầu game
+    gameState = "PLAYING";
+    gameOverReason = "";
+    resetFruit();
+    resetBomb();
+}
 
-        // Các loại trái cây & vật phẩm
-        const ITEM_TYPES = {
-            APPLE: { type: 'fruit', symbol: '🍎', pts: 1, speed: 3 },
-            BANANA: { type: 'fruit', symbol: '🍌', pts: 2, speed: 4 },
-            WATERMELON: { type: 'fruit', symbol: '🍉', pts: 3, speed: 5 },
-            BOMB: { type: 'bomb', symbol: '💣', pts: 0, speed: 4.5 },
-            EXPAND: { type: 'powerup', symbol: '↔', pts: 0, speed: 3.5 } // Vật phẩm mở rộng thanh hứng
-        };
+function resetFruit() {
+    const randomType = FRUIT_TYPES[Math.floor(Math.random() * FRUIT_TYPES.length)];
+    currentFruit.type = randomType;
+    currentFruit.x = Math.random() * (canvas.width - randomType.size);
+    currentFruit.y = -randomType.size;
+    currentFruit.isGold = Math.random() < 0.4; // 40% xuất hiện bản VÀNG
+    currentFruit.speed = randomType.speedMod + (score / 150);
+}
 
-        // --- SỰ KIỆN ĐIỀU KHIỂN ---
-        document.addEventListener("keydown", (e) => {
-            if (e.key === "Right" || e.key === "ArrowRight") rightPressed = true;
-            if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = true;
-            if (e.key === "r" || e.key === "R") {
-                if (gameOver) restartGame();
-            }
+function resetBomb() {
+    if (Math.random() < 0.6) {
+        bomb.active = true;
+        bomb.x = Math.random() * (canvas.width - bomb.size);
+        bomb.y = -Math.random() * 200 - 50;
+        bomb.speed = 3.8 + (score / 120);
+    } else {
+        bomb.active = false;
+        bomb.y = -200;
+    }
+}
+
+// --- VẼ CHI TIẾT CÁC LOẠI TRÁI CÂY ---
+function drawFruit() {
+    const cx = currentFruit.x + currentFruit.type.size / 2;
+    const cy = currentFruit.y + currentFruit.type.size / 2;
+    const size = currentFruit.type.size;
+    const r = size / 2;
+
+    const mainColor = currentFruit.isGold ? "#FFD700" : currentFruit.type.color;
+
+    ctx.save();
+
+    if (currentFruit.type.name === "apple") {
+        ctx.fillStyle = mainColor;
+        ctx.beginPath();
+        ctx.arc(cx - r / 3, cy, r * 0.7, 0, Math.PI * 2);
+        ctx.arc(cx + r / 3, cy, r * 0.7, 0, Math.PI * 2);
+        ctx.arc(cx, cy + r / 4, r * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "#5C4033";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r * 0.5);
+        ctx.quadraticCurveTo(cx + 3, cy - r * 0.9, cx + 5, cy - r * 1.1);
+        ctx.stroke();
+
+        ctx.fillStyle = currentFruit.isGold ? "#B8860B" : "#32CD32";
+        ctx.beginPath();
+        ctx.ellipse(cx + 4, cy - r * 0.8, 5, 2.5, Math.PI / 4, 0, Math.PI * 2);
+        ctx.fill();
+
+    } else if (currentFruit.type.name === "orange") {
+        ctx.fillStyle = mainColor;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#228B22";
+        ctx.beginPath();
+        ctx.arc(cx, cy - r + 2, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "rgba(0,0,0,0.1)";
+        ctx.fillRect(cx - r / 2, cy, 2, 2);
+        ctx.fillRect(cx + r / 3, cy - 3, 2, 2);
+        ctx.fillRect(cx - 2, cy + r / 3, 2, 2);
+
+    } else if (currentFruit.type.name === "banana") {
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 9;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(cx - 6, cy, r * 0.9, -Math.PI / 3, Math.PI / 3);
+        ctx.stroke();
+
+        ctx.fillStyle = "#5C4033";
+        ctx.beginPath();
+        ctx.arc(cx + r / 2 - 2, cy - r + 3, 2.5, 0, Math.PI * 2);
+        ctx.arc(cx + r / 2 - 2, cy + r - 3, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+    } else if (currentFruit.type.name === "strawberry") {
+        ctx.fillStyle = mainColor;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + r);
+        ctx.quadraticCurveTo(cx - r * 1.1, cy - r * 0.2, cx - r * 0.8, cy - r * 0.5);
+        ctx.quadraticCurveTo(cx, cy - r * 0.8, cx + r * 0.8, cy - r * 0.5);
+        ctx.quadraticCurveTo(cx + r * 1.1, cy - r * 0.2, cx, cy + r);
+        ctx.fill();
+
+        ctx.fillStyle = currentFruit.isGold ? "#B8860B" : "#228B22";
+        ctx.beginPath();
+        ctx.arc(cx, cy - r * 0.5, 5, 0, Math.PI);
+        ctx.fill();
+
+        ctx.fillStyle = "#FFF8DC";
+        const dots = [[-3, -2], [3, -2], [-5, 3], [5, 3], [0, 7]];
+        dots.forEach(([dx, dy]) => {
+            ctx.fillRect(cx + dx, cy + dy, 1.5, 2.5);
         });
 
-        document.addEventListener("keyup", (e) => {
-            if (e.key === "Right" || e.key === "ArrowRight") rightPressed = false;
-            if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = false;
-        });
+    } else if (currentFruit.type.name === "watermelon") {
+        ctx.fillStyle = mainColor;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + r * 0.8);
+        ctx.lineTo(cx - r, cy - r * 0.6);
+        ctx.lineTo(cx + r, cy - r * 0.6);
+        ctx.closePath();
+        ctx.fill();
 
-        // Điều khiển bằng chuột
-        canvas.addEventListener("mousemove", (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            paddle.x = mouseX - paddle.width / 2;
-        });
+        ctx.strokeStyle = currentFruit.isGold ? "#B8860B" : "#006400";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(cx - r - 1, cy - r * 0.6);
+        ctx.lineTo(cx + r + 1, cy - r * 0.6);
+        ctx.stroke();
 
-        // --- HÀM TẠO HIỆU ỨNG RUNG MÀN HÌNH ---
-        function triggerScreenShake(duration = 15, magnitude = 10) {
-            shakeDuration = duration;
-            shakeMagnitude = magnitude;
+        ctx.fillStyle = "#000";
+        ctx.fillRect(cx - 3, cy - 1, 2, 3);
+        ctx.fillRect(cx + 3, cy - 1, 2, 3);
+        ctx.fillRect(cx, cy + 5, 2, 3);
+    }
+
+    if (currentFruit.isGold) {
+        ctx.strokeStyle = "rgba(255, 215, 0, 0.8)";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + 5, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+// Vẽ giỏ hứng
+function drawBasket() {
+    ctx.fillStyle = "#8B4513";
+    ctx.beginPath();
+    ctx.roundRect(basket.x, basket.y, basket.width, basket.height, 6);
+    ctx.fill();
+
+    ctx.fillStyle = "#A0522D";
+    ctx.fillRect(basket.x + 5, basket.y + 4, basket.width - 10, 4);
+}
+
+// Vẽ Bom
+function drawBomb() {
+    if (!bomb.active) return;
+
+    const cx = bomb.x + bomb.size / 2;
+    const cy = bomb.y + bomb.size / 2;
+    const r = bomb.size / 2;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = "#111";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx + 4, cy - r - 6);
+    ctx.strokeStyle = "#D2691E";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx + 4, cy - r - 7, 3, 0, Math.PI * 2);
+    ctx.fillStyle = "#FF4500";
+    ctx.fill();
+}
+
+// --- LOGIC GAME ---
+function update() {
+    if (gameState !== "PLAYING") return;
+
+    basket.x += basket.dx;
+    if (basket.x < 0) basket.x = 0;
+    if (basket.x + basket.width > canvas.width) basket.x = canvas.width - basket.width;
+
+    currentFruit.y += currentFruit.speed;
+
+    // Hứng trái cây thành công
+    if (
+        currentFruit.y + currentFruit.type.size >= basket.y &&
+        currentFruit.x + currentFruit.type.size >= basket.x &&
+        currentFruit.x <= basket.x + basket.width
+    ) {
+        const earnedScore = currentFruit.isGold ? 20 : 10;
+        score += earnedScore;
+
+        if (currentFruit.isGold) {
+            playGoldFruitSound();
+        } else {
+            playEatSound();
         }
 
-        // --- TẠO VẬT PHẨM RƠI ---
-        function spawnItem() {
-            const rand = Math.random();
-            let selectedType;
-
-            if (rand < 0.50) {
-                selectedType = ITEM_TYPES.APPLE;
-            } else if (rand < 0.70) {
-                selectedType = ITEM_TYPES.BANANA;
-            } else if (rand < 0.82) {
-                selectedType = ITEM_TYPES.WATERMELON;
-            } else if (rand < 0.93) {
-                selectedType = ITEM_TYPES.BOMB;
-            } else {
-                selectedType = ITEM_TYPES.EXPAND; // Mũi tên 2 đầu mở rộng
-            }
-
-            items.push({
-                x: Math.random() * (canvas.width - 40) + 20,
-                y: -30,
-                radius: 20,
-                ...selectedType
-            });
+        if (score > highScore) {
+            highScore = score;
+            localStorage.setItem("fruit_game_highscore", highScore);
         }
 
-        // --- CẬP NHẬT MÀU NỀN THEO ĐIỂM SỐ ---
-        function updateBackgroundTheme() {
-            if (score < 10) {
-                // Ban ngày (Xanh bầu trời)
-                canvas.style.backgroundColor = "#87ceeb";
-            } else if (score < 20) {
-                // Hoàng hôn (Cam gạch / Tím ấm)
-                canvas.style.backgroundColor = "#e67e22";
-            } else {
-                // Ban đêm (Xanh đen đậm)
-                canvas.style.backgroundColor = "#1e272e";
-            }
+        resetFruit();
+        if (!bomb.active) resetBomb();
+    }
+
+    // Bỏ sót trái cây -> Trừ mạng
+    if (currentFruit.y > canvas.height) {
+        lives -= 1;
+        if (lives > 0) {
+            playLoseLifeSound();
+            resetFruit();
+        } else {
+            gameState = "GAMEOVER";
+            gameOverReason = "BẠN ĐÃ HẾT MẠNG!";
+            playGameOverSound();
+        }
+    }
+
+    // Né bom
+    if (bomb.active) {
+        bomb.y += bomb.speed;
+
+        if (
+            bomb.y + bomb.size >= basket.y &&
+            bomb.x + bomb.size >= basket.x &&
+            bomb.x <= basket.x + basket.width
+        ) {
+            gameState = "GAMEOVER";
+            gameOverReason = "💥 BẠN ĐÃ TRÚNG BOM!";
+            playExplosionSound();
         }
 
-        // --- KÍCH HOẠT VẬT PHẨM MỞ RỘNG ---
-        function activateExpandPowerup() {
-            paddle.width = BASE_PADDLE_WIDTH * 1.5; // Gấp rưỡi (150px)
-            paddle.isExpanded = true;
-
-            // Xóa bộ đếm thời gian cũ nếu ăn liên tiếp
-            if (paddle.expandTimer) clearTimeout(paddle.expandTimer);
-
-            // Trở về kích thước ban đầu sau 8 giây
-            paddle.expandTimer = setTimeout(() => {
-                paddle.width = BASE_PADDLE_WIDTH;
-                paddle.isExpanded = false;
-            }, 8000);
+        if (bomb.y > canvas.height) {
+            resetBomb();
         }
+    }
+}
 
-        // --- CẬP NHẬT LOGIC GAME ---
-        function update() {
-            if (gameOver) return;
+// --- VẼ MÀN HÌNH ---
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Di chuyển thanh hứng bằng bàn phím
-            if (rightPressed && paddle.x < canvas.width - paddle.width) {
-                paddle.x += paddle.speed;
-            } else if (leftPressed && paddle.x > 0) {
-                paddle.x -= paddle.speed;
-            }
+    if (gameState === "MENU") {
+        // --- MÀN HÌNH MENU ---
+        ctx.fillStyle = "rgba(255, 250, 240, 0.95)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Giới hạn thanh hứng trong màn hình
-            if (paddle.x < 0) paddle.x = 0;
-            if (paddle.x + paddle.width > canvas.width) paddle.x = canvas.width - paddle.width;
+        ctx.fillStyle = "#2E8B57";
+        ctx.font = "bold 26px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("HỨNG TRÁI CÂY", canvas.width / 2, 80);
 
-            // Sinh vật phẩm theo thời gian
-            spawnTimer++;
-            if (spawnTimer > 40) {
-                spawnItem();
-                spawnTimer = 0;
-            }
+        ctx.fillStyle = "#555";
+        ctx.font = "14px Arial";
+        ctx.fillText("❤️ Có tổng cộng 3 mạng chơi", canvas.width / 2, 125);
+        ctx.fillText("🍎 Trái Thường: +10 điểm", canvas.width / 2, 150);
+        ctx.fillStyle = "#B8860B";
+        ctx.fillText("🌟 Trái Vàng: +20 điểm", canvas.width / 2, 175);
+        ctx.fillStyle = "#D9534F";
+        ctx.fillText("💥 Bom đen: Nổ thua ngay!", canvas.width / 2, 200);
 
-            // Cập nhật vị trí các vật phẩm
-            for (let i = items.length - 1; i >= 0; i--) {
-                let item = items[i];
-                item.y += item.speed;
+        ctx.fillStyle = "#D2691E";
+        ctx.font = "bold 15px Arial";
+        ctx.fillText("🏆 Kỷ lục: " + highScore + " điểm", canvas.width / 2, 240);
 
-                // Kiểm tra va chạm với thanh hứng
-                if (
-                    item.y + item.radius >= paddle.y &&
-                    item.y - item.radius <= paddle.y + paddle.height &&
-                    item.x >= paddle.x &&
-                    item.x <= paddle.x + paddle.width
-                ) {
-                    // Xử lý loại vật phẩm
-                    if (item.type === 'fruit') {
-                        score += item.pts;
-                    } else if (item.type === 'bomb') {
-                        lives--;
-                        triggerScreenShake(20, 12); // Rung màn hình khi trúng bom
-                        if (lives <= 0) gameOver = true;
-                    } else if (item.type === 'powerup') {
-                        activateExpandPowerup();
-                    }
+        // Nút Bắt đầu
+        ctx.fillStyle = "#28A745";
+        ctx.beginPath();
+        ctx.roundRect(canvas.width / 2 - 80, 280, 160, 45, 10);
+        ctx.fill();
 
-                    items.splice(i, 1);
-                    continue;
-                }
+        ctx.fillStyle = "#FFF";
+        ctx.font = "bold 18px Arial";
+        ctx.fillText("BẮT ĐẦU", canvas.width / 2, 308);
 
-                // Xử lý khi vật phẩm rơi chạm đáy
-                if (item.y - item.radius > canvas.height) {
-                    if (item.type === 'fruit') {
-                        lives--;
-                        if (lives <= 0) gameOver = true;
-                    }
-                    items.splice(i, 1);
-                }
-            }
+    } else if (gameState === "PLAYING") {
+        // --- MÀN HÌNH CHƠI GAME ---
+        drawBasket();
+        drawFruit();
+        drawBomb();
 
-            updateBackgroundTheme();
-        }
+        // Hiển thị số Mạng (Lives) dạng trái tim
+        let heartStr = "";
+        for (let i = 0; i < lives; i++) heartStr += "❤️";
+        ctx.fillStyle = "#FF0000";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(heartStr, 15, 30);
 
-        // --- VẼ HÌNH TRÊN CANVAS ---
-        function draw() {
-            ctx.save();
+        // Hiển thị Điểm số
+        ctx.fillStyle = "#222";
+        ctx.font = "bold 16px Arial";
+        ctx.fillText("Điểm: " + score, 110, 30);
 
-            // Áp dụng hiệu ứng Rung màn hình (Screen Shake)
-            if (shakeDuration > 0) {
-                let offsetX = (Math.random() - 0.5) * shakeMagnitude;
-                let offsetY = (Math.random() - 0.5) * shakeMagnitude;
-                ctx.translate(offsetX, offsetY);
-                shakeDuration--;
-            }
+        // Hiển thị Kỷ lục
+        ctx.fillStyle = "#D2691E";
+        ctx.textAlign = "right";
+        ctx.fillText("Kỷ lục: " + highScore, canvas.width - 15, 30);
 
-            // Xóa màn hình
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+    } else if (gameState === "GAMEOVER") {
+        // --- MÀN HÌNH GAME OVER ---
+        drawBasket();
+        drawFruit();
+        drawBomb();
 
-            // 1. Vẽ thanh hứng
-            ctx.fillStyle = paddle.isExpanded ? "#2ecc71" : "#d35400"; // Đổi sang màu xanh khi đang mở rộng
-            ctx.beginPath();
-            ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 8);
-            ctx.fill();
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = "#ffffff";
-            ctx.stroke();
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 2. Vẽ các vật phẩm rơi
-            ctx.font = "28px Sans-serif";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
+        ctx.fillStyle = "#FF3333";
+        ctx.font = "bold 26px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 45);
 
-            items.forEach(item => {
-                ctx.fillText(item.symbol, item.x, item.y);
-            });
+        ctx.fillStyle = "#FFD700";
+        ctx.font = "bold 15px Arial";
+        ctx.fillText(gameOverReason, canvas.width / 2, canvas.height / 2 - 12);
 
-            // 3. Vẽ UI (Điểm số & Mạng)
-            ctx.fillStyle = score >= 20 ? "#ffffff" : "#2c3e50"; // Đổi màu chữ UI khi sang ban đêm
-            ctx.font = "bold 18px Arial";
-            ctx.textAlign = "left";
-            ctx.fillText(`Điểm: ${score}`, 15, 30);
+        ctx.fillStyle = "#FFF";
+        ctx.font = "16px Arial";
+        ctx.fillText("Điểm của bạn: " + score, canvas.width / 2, canvas.height / 2 + 22);
 
-            ctx.textAlign = "right";
-            ctx.fillText(`Mạng: ${"❤️".repeat(lives)}`, canvas.width - 15, 30);
+        // Nút Chơi lại
+        ctx.fillStyle = "#007BFF";
+        ctx.beginPath();
+        ctx.roundRect(canvas.width / 2 - 75, canvas.height / 2 + 50, 150, 40, 8);
+        ctx.fill();
 
-            // Trạng thái hiệu ứng mở rộng
-            if (paddle.isExpanded) {
-                ctx.fillStyle = "#f1c40f";
-                ctx.font = "bold 13px Arial";
-                ctx.textAlign = "center";
-                ctx.fillText("⚡ THANH HỨNG MỞ RỘNG (↔) ⚡", canvas.width / 2, 30);
-            }
+        ctx.fillStyle = "#FFF";
+        ctx.font = "bold 16px Arial";
+        ctx.fillText("CHƠI LẠI", canvas.width / 2, canvas.height / 2 + 75);
+    }
+}
 
-            // 4. Màn hình Game Over
-            if (gameOver) {
-                ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
 
-                ctx.fillStyle = "#e74c3c";
-                ctx.font = "bold 36px Arial";
-                ctx.textAlign = "center";
-                ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
-
-                ctx.fillStyle = "#ffffff";
-                ctx.font = "20px Arial";
-                ctx.fillText(`Tổng điểm của bạn: ${score}`, canvas.width / 2, canvas.height / 2 + 25);
-                ctx.font = "16px Arial";
-                ctx.fillText("Bấm phím 'R' để chơi lại", canvas.width / 2, canvas.height / 2 + 65);
-            }
-
-            ctx.restore();
-        }
-
-        // --- KHỞI ĐỘNG LẠI GAME ---
-        function restartGame() {
-            score = 0;
-            lives = 3;
-            items = [];
-            gameOver = false;
-            paddle.width = BASE_PADDLE_WIDTH;
-            paddle.isExpanded = false;
-            if (paddle.expandTimer) clearTimeout(paddle.expandTimer);
-        }
-
-        // --- VÒNG LẶP CHÍNH (GAME LOOP) ---
-        function gameLoop() {
-            update();
-            draw();
-            requestAnimationFrame(gameLoop);
-        }
-
-        // Chạy game
-        gameLoop();
-    </script>
-</body>
-</html>
+gameLoop();
