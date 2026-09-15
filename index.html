@@ -2,29 +2,74 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Game Hứng Táo 2D</title>
     <style>
+        * {
+            box-sizing: border-box;
+            user-select: none; /* Ngăn bôi đen văn bản khi bấm liên tục trên điện thoại */
+            -webkit-user-select: none;
+        }
         body {
             margin: 0;
-            padding: 0;
-            background-color: #222;
+            padding: 10px;
+            background-color: #1a1a1a;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             color: white;
             font-family: Arial, sans-serif;
+            touch-action: manipulation; /* Tối ưu hóa phản hồi cảm ứng */
         }
         canvas {
-            border: 4px solid #fff;
-            background-color: #87CEEB; /* Mầu nền bầu trời */
+            border: 3px solid #fff;
+            border-radius: 8px;
+            background-color: #87CEEB;
+            max-width: 100%;
+            height: auto;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        /* Nút điều khiển trên điện thoại */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 400px;
+            margin-top: 15px;
+            gap: 15px;
+        }
+        .btn-control {
+            flex: 1;
+            padding: 18px 0;
+            font-size: 24px;
+            font-weight: bold;
+            background-color: #ff9800;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 5px #e65100;
+            cursor: pointer;
+            text-align: center;
+            active: scale(0.98);
+        }
+        .btn-control:active {
+            box-shadow: 0 2px #e65100;
+            transform: translateY(3px);
+            background-color: #f57c00;
         }
     </style>
 </head>
 <body>
 
     <canvas id="gameCanvas" width="400" height="500"></canvas>
+
+    <!-- Nút điều khiển cảm ứng -->
+    <div class="controls">
+        <button id="btnLeft" class="btn-control">◀ TRÁI</button>
+        <button id="btnRight" class="btn-control">PHẢI ▶</button>
+    </div>
 
     <script src="game.js"></script>
 </body>
